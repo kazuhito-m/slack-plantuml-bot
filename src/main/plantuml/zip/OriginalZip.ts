@@ -523,10 +523,21 @@ export default class OriginalZip {
         for (let bits = 0; bits <= Constant.MAX_BITS; bits++)
             this.bl_count[bits] = 0;
         let n = 0;
-        while (n <= 143) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
-        while (n <= 255) { this.static_ltree[n++].dl = 9; this.bl_count[9]++; }
-        while (n <= 279) { this.static_ltree[n++].dl = 7; this.bl_count[7]++; }
-        while (n <= 287) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
+
+        for (n = 0; n <= 287; n++) {
+            let dlValue = 8;
+            if (n <= 143) dlValue = 8
+            else if (n <= 255) dlValue = 9
+            else if (n <= 279) dlValue = 7;
+        
+            this.static_ltree[n].dl = dlValue;
+            this.bl_count[dlValue]++;
+        }
+        // // 上は下のルーチンを書き換えたもの TODO 安定したら下を消す     
+        // while (n <= 143) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
+        // while (n <= 255) { this.static_ltree[n++].dl = 9; this.bl_count[9]++; }
+        // while (n <= 279) { this.static_ltree[n++].dl = 7; this.bl_count[7]++; }
+        // while (n <= 287) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
 
         this.gen_codes(this.static_ltree, Constant.L_CODES + 1);
 
