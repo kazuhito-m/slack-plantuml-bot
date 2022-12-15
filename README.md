@@ -9,6 +9,13 @@
 
 Slack上でPlantUMLの記述を行えば画像を返してくれるボット。
 
+## Prerequisite
+
+以下の環境下にて、テスト・ビルドが可能を確認している。
+
+- node.js: `10.24.1`
+- npm: `6.14.17`
+
 ## Usage
 
 ### npm build & node run
