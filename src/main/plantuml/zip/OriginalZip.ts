@@ -524,9 +524,10 @@ export default class OriginalZip {
             this.bl_count[bits] = 0;
         for (let n = 0; n < this.static_ltree.length; n++) {
             let dlValue = 8;
-            if (n <= 143) dlValue = 8
-            else if (n <= 255) dlValue = 9
-            else if (n <= 279) dlValue = 7;
+            if (n > 143) {
+                if (n <= 255) dlValue = 9
+                else if (n <= 279) dlValue = 7;
+            }
         
             this.static_ltree[n].dl = dlValue;
             this.bl_count[dlValue]++;
