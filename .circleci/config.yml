@@ -1,20 +1,22 @@
-version: 2
+version: 2.1
+
+orbs:
+  discord: antonioned/discord@0.1.0
+
 jobs:
-  build:
+  test:
     docker:
-      - image: circleci/node:9.2
+      - image: cimg/node:10.24.1
 
     working_directory: ~/repo
 
     steps:
       - checkout
 
-      # Download and cache dependencies
       - restore_cache:
           keys:
-          - v1-dependencies-{{ checksum "package.json" }}
-          # fallback to using the latest cache if no exact match is found
-          - v1-dependencies-
+            - v1-dependencies-{{ checksum "package.json" }}
+            - v1-dependencies- # 完全一致で見つからない場合用、最新キャッシュ取得
 
       - run: npm install
 
@@ -22,6 +24,17 @@ jobs:
           paths:
             - node_modules
           key: v1-dependencies-{{ checksum "package.json" }}
-        
-      # run tests!
+
       - run: npm test
+
+      - discord/status:
+          fail_only: true
+          failure_message: "Triggered User: **${CIRCLE_USERNAME}**\\nBranch: **${CIRCLE_BRANCH}**\\n\\nCircleCI テストに失敗しました。 JOB: **$CIRCLE_JOB**"
+          webhook: "${DISCORD_WEBHOOK}"
+
+workflows:
+  version: 2
+  ci:
+    jobs:
+      - test:
+          context: kazuhito_m-products
