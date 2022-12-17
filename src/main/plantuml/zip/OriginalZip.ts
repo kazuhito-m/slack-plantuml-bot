@@ -471,11 +471,14 @@ export default class OriginalZip {
                 this.dist_code[256 + dist++] = code;
         }
 
-        let n = 0;
-        while (n <= 143) { this.static_ltree[n++].dl = 8; }
-        while (n <= 255) { this.static_ltree[n++].dl = 9; }
-        while (n <= 279) { this.static_ltree[n++].dl = 7; }
-        while (n <= 287) { this.static_ltree[n++].dl = 8; }
+        for (let n = 0; n < this.static_ltree.length; n++) {
+            let dlValue = 8;
+            if (n > 143) {
+                if (n <= 255) dlValue = 9
+                else if (n <= 279) dlValue = 7;
+            }
+            this.static_ltree[n].dl = dlValue;
+        }
 
         this.heepState.initialSetBlCount();
 

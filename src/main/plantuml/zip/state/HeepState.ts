@@ -253,11 +253,16 @@ export default class HeepState {
 
     public initialSetBlCount = () => {
         this.clearBlCounts();
-        let n = 0;
-        while (n <= 143) { n++; this._bl_count[8]++; }
-        while (n <= 255) { n++; this._bl_count[9]++; }
-        while (n <= 279) { n++; this._bl_count[7]++; }
-        while (n <= 287) { n++; this._bl_count[8]++; }
+
+        // TODO ここはOrignalZip.tsと重複している(元々一つだし) ハードコードしている数値も合わせ、改善したい。
+        for (let n = 0; n <= 287; n++) {
+            let dlValue = 8;
+            if (n > 143) {
+                if (n <= 255) dlValue = 9
+                else if (n <= 279) dlValue = 7;
+            }
+            this._bl_count[dlValue]++;
+        }
     }
 
     // getter/setter
