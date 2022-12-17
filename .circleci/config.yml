@@ -1,6 +1,10 @@
 version: 2
+
+orbs:
+  discord: antonioned/discord@0.1.0
+
 jobs:
-  build:
+  test:
     docker:
       - image: cimg/node:10.24.1
 
@@ -22,3 +26,15 @@ jobs:
           key: v1-dependencies-{{ checksum "package.json" }}
         
       - run: npm test
+
+      - discord/status:
+          fail_only: true
+          failure_message: "Triggered User: **${CIRCLE_USERNAME}**\\nBranch: **${CIRCLE_BRANCH}**\\n\\nCircleCI テストに失敗しました。 JOB: **$CIRCLE_JOB**"
+          webhook: "${DISCORD_WEBHOOK}"
+
+workflows:
+  version: 2
+  ci:
+    jobs:
+      - test:
+          context: kazuhito_m-products
