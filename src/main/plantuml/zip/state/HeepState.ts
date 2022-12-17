@@ -23,8 +23,9 @@ export default class HeepState {
     }
 
     public build_tree = (desc: DeflateTreeDesc) => { // the tree descriptor
-
-        const tree: Array<DeflateCT> = desc.dyn_tree;
+        if (!desc.dyn_tree) throw new Error();  // 後付けチェック TODO 消したい
+        
+        const tree = desc.dyn_tree;
         const stree = desc.static_tree;
         const elems = desc.elems;
 
@@ -117,7 +118,8 @@ export default class HeepState {
     }
 
     private gen_bitlen = (desc: DeflateTreeDesc, heap_max:number) => { // the tree descriptor
-
+        if (!desc.dyn_tree) throw new Error();  // 後付けチェック TODO 消したい
+        
         const tree = desc.dyn_tree;
         const extra = desc.extra_bits;
         const base = desc.extra_base;

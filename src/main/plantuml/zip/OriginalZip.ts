@@ -13,17 +13,17 @@ import Bits from './state/Bits';
  */
 export default class OriginalZip {
 
-    private state:ZipState = new ZipState();
-    private que:Que = new Que();
-    private deflateState:DeflateState = new DeflateState();
-    private treeState:TreeState = new TreeState();
-    private heepState:HeepState = new HeepState();
-    private bits:Bits = new Bits();
+    private state: ZipState = new ZipState();
+    private que: Que = new Que();
+    private deflateState: DeflateState = new DeflateState();
+    private treeState: TreeState = new TreeState();
+    private heepState: HeepState = new HeepState();
+    private bits: Bits = new Bits();
 
     /* private readonly iables */
-    private d_buf: Array<number>;
-    private l_buf: Array<number>;
-    private prev: Array<number>;
+    private d_buf: Array<number> | null = null;
+    private l_buf: Array<number> | null = null;
+    private prev: Array<number> | null = null;
     private block_start: number = 0;
     private ins_h: number = 0;
     private hash_head: number = 0;
@@ -39,18 +39,18 @@ export default class OriginalZip {
     private nice_match: number = 0;
 
     private compr_level: number = 0;
-    private dyn_ltree: Array<DeflateCT>;
-    private dyn_dtree: Array<DeflateCT>;
-    private static_ltree: Array<DeflateCT>;
-    private static_dtree: Array<DeflateCT>;
-    private l_desc: DeflateTreeDesc;
-    private d_desc: DeflateTreeDesc;
-    private bl_desc: DeflateTreeDesc;
-    private length_code: Array<number>;
-    private dist_code: Array<number>;
-    private base_length: Array<number>;
-    private base_dist: Array<number>;
-    private flag_buf: Array<number>;
+    private dyn_ltree: Array<DeflateCT> | null = null;
+    private dyn_dtree: Array<DeflateCT> | null = null;
+    private static_ltree: Array<DeflateCT> = new Array<DeflateCT>(0);
+    private static_dtree: Array<DeflateCT> | null = null;
+    private l_desc: DeflateTreeDesc = new DeflateTreeDesc();
+    private d_desc: DeflateTreeDesc = new DeflateTreeDesc();
+    private bl_desc: DeflateTreeDesc = new DeflateTreeDesc();
+    private length_code: Array<number> = new Array<number>(0);
+    private dist_code: Array<number> = new Array<number>(0);
+    private base_length: Array<number> = new Array<number>(0);
+    private base_dist: Array<number> = new Array<number>(0);
+    private flag_buf: Array<number> = new Array<number>(0);
     private last_lit: number = 0;
     private last_dist: number = 0;
     private last_flags: number = 0;
@@ -206,7 +206,7 @@ export default class OriginalZip {
                 /* No match, output a literal byte */
                 flush = this.ct_tally(0, this.deflateState.firstPositionCode());
                 this.lookahead--;
-                this.deflateState.moveNextStartPostion();   
+                this.deflateState.moveNextStartPostion();
             }
             if (flush) {
                 this.flush_block(0);
@@ -219,6 +219,8 @@ export default class OriginalZip {
     }
 
     private INSERT_STRING = () => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         this.ins_h = ((this.ins_h << Constant.H_SHIFT)
             ^ this.deflateState.positionCodeOffset(Constant.MIN_MATCH - 1)
         ) & Constant.HASH_MASK;
@@ -226,14 +228,20 @@ export default class OriginalZip {
         this.prev[this.deflateState.strstart & Constant.WMASK] = this.hash_head;
         this.head2(this.ins_h, this.deflateState.strstart);
     }
+
     private head1 = (i: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
         return this.prev[Constant.WSIZE + i];
     }
+
     private head2 = (i: number, val: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
         return this.prev[Constant.WSIZE + i] = val;
     }
 
     private longest_match = (cur_match: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         let chain_length: number = this.max_chain_length; // max hash chain length
         let scanp: number = this.deflateState.strstart; // current string
         let matchp: number;		// matched string
@@ -339,7 +347,7 @@ export default class OriginalZip {
                     this.block_start = this.deflateState.strstart;
                 }
             } else if (this.match_available != 0) {
-                if (this.ct_tally(0,this.deflateState.positionCodeOffset(-1))) {
+                if (this.ct_tally(0, this.deflateState.positionCodeOffset(-1))) {
                     this.flush_block(0);
                     this.block_start = this.deflateState.strstart;
                 }
@@ -362,7 +370,10 @@ export default class OriginalZip {
      * @param lc  match length-MIN_MATCH or unmatched char (if dist==0).
      */
     private ct_tally = (dist: number, lc: number) => {
-
+        if (!this.l_buf) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.d_buf) throw new Error();  // 後付けチェック TODO 消したい
 
         this.l_buf[this.last_lit++] = lc;
 
@@ -406,6 +417,8 @@ export default class OriginalZip {
 
 
     private ct_init = () => {
+        if (!this.static_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         let code: number;	// code value
         let dist: number;	// distance index
 
@@ -483,6 +496,9 @@ export default class OriginalZip {
      * @number true if this is the last block for a file
      */
     private flush_block = (eof: number) => {
+        if (!this.static_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
 
         let stored_len = this.deflateState.strstart - this.block_start;	// length of input block
         this.flag_buf[this.last_flags] = this.flags; // Save the flags for the last 8 items
@@ -533,6 +549,8 @@ export default class OriginalZip {
      * @param dtree distance tree.
      */
     private compress_block = (ltree: Array<DeflateCT>, dtree: Array<DeflateCT>) => {
+        if (!this.l_buf) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.d_buf) throw new Error();  // 後付けチェック TODO 消したい
 
         let dist: number;		// distance of matched string
         let lc: number;		// match length or unmatched char (if dist == 0)
@@ -583,6 +601,9 @@ export default class OriginalZip {
     }
 
     private init_block = () => {
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         // Initialize the trees.
         for (let n = 0; n < Constant.L_CODES; n++) this.dyn_ltree[n].fc = 0;
         for (let n = 0; n < Constant.D_CODES; n++) this.dyn_dtree[n].fc = 0;
@@ -598,6 +619,9 @@ export default class OriginalZip {
     }
 
     private send_all_trees = (lcodes: number, dcodes: number, blcodes: number) => { // number of codes for each tree
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         this.bits.send_bits(lcodes - 257, 5, this.que); // not +255 as stated in appnote.txt
         this.bits.send_bits(dcodes - 1, 5, this.que);
         this.bits.send_bits(blcodes - 4, 4, this.que); // not -3 as stated in appnote.txt
@@ -667,6 +691,8 @@ export default class OriginalZip {
     }
 
     private lm_init = () => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         /* Initialize the hash table. */
         for (let j = 0; j < Constant.HASH_SIZE; j++)
             this.prev[Constant.WSIZE + j] = 0;
@@ -698,6 +724,8 @@ export default class OriginalZip {
     }
 
     private fill_window = () => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         let more = Constant.WINDOW_SIZE - this.lookahead - this.deflateState.strstart;
 
         if (more == -1) {
@@ -729,7 +757,10 @@ export default class OriginalZip {
         }
     }
 
-    private build_bl_tree(treeState:TreeState): number {
+    private build_bl_tree(treeState: TreeState): number {
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         treeState.scan_tree(this.dyn_ltree, this.l_desc.max_code);
         treeState.scan_tree(this.dyn_dtree, this.d_desc.max_code);
 
