@@ -485,9 +485,9 @@ export default class OriginalZip {
         this.heepState.gen_codes(this.static_ltree, Constant.L_CODES + 1);
 
         /* The static distance tree is trivial: */
-        for (n = 0; n < Constant.D_CODES; n++) {
-            this.static_dtree[n].dl = 5;
-            this.static_dtree[n].fc = this.heepState.bi_reverse(n, 5);
+        for (let i = 0; i < Constant.D_CODES; i++) {
+            this.static_dtree[i].dl = 5;
+            this.static_dtree[i].fc = this.heepState.bi_reverse(i, 5);
         }
 
         // Initialize the first block of the first file:
