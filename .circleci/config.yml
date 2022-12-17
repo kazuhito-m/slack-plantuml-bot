@@ -1,4 +1,4 @@
-version: 2
+version: 2.1
 
 orbs:
   discord: antonioned/discord@0.1.0
@@ -15,8 +15,8 @@ jobs:
 
       - restore_cache:
           keys:
-          - v1-dependencies-{{ checksum "package.json" }}
-          - v1-dependencies- # 完全一致で見つからない場合用、最新キャッシュ取得
+            - v1-dependencies-{{ checksum "package.json" }}
+            - v1-dependencies- # 完全一致で見つからない場合用、最新キャッシュ取得
 
       - run: npm install
 
@@ -24,7 +24,7 @@ jobs:
           paths:
             - node_modules
           key: v1-dependencies-{{ checksum "package.json" }}
-        
+
       - run: npm test
 
       - discord/status:
