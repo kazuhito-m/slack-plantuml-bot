@@ -1,7 +1,6 @@
 import PlantUmlServerUrl from '../../main/plantuml/PlantUmlServerUrl';
 
 describe('PlantUMLサイトのURLを作成するテスト', () => {
-
     describe('generate()のテスト', () => {
         test('指定した「PlantUMLのUML構文」から、サーバに図形を要求するURLを作成できる。', () => {
             const parameter: string = "@startuml\nclass 日本語\n@enduml";
@@ -86,6 +85,4 @@ describe('PlantUMLサイトのURLを作成するテスト', () => {
             expect(actual).toEqual("Figure <|- Rect : 汎化\nRect -|> Parent");
         })
     });
-
 });
-
