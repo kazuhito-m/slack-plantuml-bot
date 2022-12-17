@@ -13,7 +13,7 @@ export default class OriginalZip {
     private qhead: DeflateBuffer | null = null;
     private qtail: DeflateBuffer = new DeflateBuffer();
     private initflag: boolean = false;
-    private outbuf: Array<number> = new Array<number>();
+    private outbuf: Array<number> | null = null;
     private outcnt: number = 0;
     private outoff: number = 0;
     private complete: boolean = false;
@@ -222,8 +222,10 @@ export default class OriginalZip {
 
 
             // System.arraycopy(outbuf, outoff, buff, off + n, i);
-            for (j = 0; j < i; j++)
+            for (j = 0; j < i; j++) {
+                if (!this.outbuf) throw new Error(); 
                 buff[off + n + j] = this.outbuf[this.outoff + j];
+            }
             this.outoff += i;
             n += i;
             if (this.outcnt == this.outoff) {
@@ -678,10 +680,9 @@ export default class OriginalZip {
     }
 
     private put_short = (w: number) => {
-
-
         w &= 0xffff;
         if (this.outoff + this.outcnt < Constant.OUTBUFSIZ - 2) {
+            if (!this.outbuf) throw new Error(); 
             this.outbuf[this.outoff + this.outcnt++] = (w & 0xff);
             this.outbuf[this.outoff + this.outcnt++] = (w >>> 8);
         } else {
@@ -691,6 +692,7 @@ export default class OriginalZip {
     }
 
     private put_byte = (c: number) => {
+        if (!this.outbuf) throw new Error(); 
         this.outbuf[this.outoff + this.outcnt++] = c;
         if (this.outoff + this.outcnt == Constant.OUTBUFSIZ)
             this.qoutbuf();
@@ -840,6 +842,8 @@ export default class OriginalZip {
         }
     }
     private qoutbuf = () => {
+        if (!this.outbuf) throw new Error(); 
+
         if (this.outcnt != 0) {
             const q = this.new_queue();
             if (this.qhead == null)
