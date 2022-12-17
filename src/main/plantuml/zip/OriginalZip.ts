@@ -1,36 +1,35 @@
 import DeflateCT from './DeflateCT';
-import DeflateBuffer from './DeflateBuffer';
 import DeflateTreeDesc from './DeflateTreeDesc';
 import Constant from './Constant';
+import ZipState from './state/ZipState';
+import Que from './state/Que';
+import DeflateState from './state/DeflateState';
+import TreeState from './state/TreeState';
+import HeepState from './state/HeepState';
+import Bits from './state/Bits';
 
 /**
  * http://s.plantuml.com/synchro.js の関数群をTypeScriptへの移植。
  */
 export default class OriginalZip {
 
+    private state: ZipState = new ZipState();
+    private que: Que = new Que();
+    private deflateState: DeflateState = new DeflateState();
+    private treeState: TreeState = new TreeState();
+    private heepState: HeepState = new HeepState();
+    private bits: Bits = new Bits();
+
     /* private readonly iables */
-    private free_queue: DeflateBuffer | null = null;
-    private qhead: DeflateBuffer | null = null;
-    private qtail: DeflateBuffer = new DeflateBuffer();
-    private initflag: boolean = false;
-    private outbuf: Array<number> | null = null;
-    private outcnt: number = 0;
-    private outoff: number = 0;
-    private complete: boolean = false;
-    private window: Array<number> = new Array<number>(0);;
-    private d_buf: Array<number> = new Array<number>(0);;
-    private l_buf: Array<number> = new Array<number>(0);;
-    private prev: Array<number> = new Array<number>(0);;
-    private bi_buf: number = 0;
-    private bi_valid: number = 0;
+    private d_buf: Array<number> | null = null;
+    private l_buf: Array<number> | null = null;
+    private prev: Array<number> | null = null;
     private block_start: number = 0;
     private ins_h: number = 0;
     private hash_head: number = 0;
     private match_available: number = 0;
     private match_length: number = 0;
     private prev_length: number = 0;
-    private strstart: number = 0;
-    private match_start: number = 0;
     private eofile: boolean = false;
     private lookahead: number = 0;
 
@@ -44,15 +43,9 @@ export default class OriginalZip {
     private dyn_dtree: Array<DeflateCT> | null = null;
     private static_ltree: Array<DeflateCT> = new Array<DeflateCT>(0);
     private static_dtree: Array<DeflateCT> | null = null;
-    private bl_tree: Array<DeflateCT> = new Array<DeflateCT>(0);
     private l_desc: DeflateTreeDesc = new DeflateTreeDesc();
     private d_desc: DeflateTreeDesc = new DeflateTreeDesc();
     private bl_desc: DeflateTreeDesc = new DeflateTreeDesc();
-    private bl_count: Array<number> = new Array<number>(0);
-    private heap: Array<number> = new Array<number>(0);
-    private heap_len: number = 0;
-    private heap_max: number = 0;
-    private depth: Array<number> = new Array<number>(0);
     private length_code: Array<number> = new Array<number>(0);
     private dist_code: Array<number> = new Array<number>(0);
     private base_length: Array<number> = new Array<number>(0);
@@ -63,14 +56,9 @@ export default class OriginalZip {
     private last_flags: number = 0;
     private flags: number = 0;
     private flag_bit: number = 0;
-    private opt_len: number = 0;
-    private static_len: number = 0;
-    private deflate_data: string = "";
-    private deflate_pos: number = 0;
 
     public deflate = (str: string, level: number): string => {
-        this.deflate_data = str;
-        this.deflate_pos = 0;
+        this.deflateState.initDeflateData(str);
         if (level == undefined) level = Constant.DEFAULT_LEVEL;
         this.deflate_start(level);
 
@@ -93,14 +81,16 @@ export default class OriginalZip {
         else if (level > 9) level = 9;
 
         this.compr_level = level;
-        this.initflag = false;
         this.eofile = false;
 
-        if (this.outbuf != null) return;
+        if (this.state.markd) return;
 
-        this.free_queue = this.qhead = null;
-        this.outbuf = new Array(Constant.OUTBUFSIZ);
-        this.window = new Array(Constant.WINDOW_SIZE);
+        this.state.initialize();
+        this.que.initialize();
+        this.deflateState.initialize();
+        this.treeState.initialize();
+        this.bits.initialize();
+
         this.d_buf = new Array(Constant.DIST_BUFSIZE);
         this.l_buf = new Array(Constant.INBUFSIZ + Constant.INBUF_EXTRA);
         this.prev = new Array(1 << Constant.BITS);
@@ -116,15 +106,9 @@ export default class OriginalZip {
         this.static_dtree = new Array(Constant.D_CODES);
         for (i = 0; i < Constant.D_CODES; i++)
             this.static_dtree[i] = new DeflateCT();
-        this.bl_tree = new Array(2 * Constant.BL_CODES + 1);
-        for (i = 0; i < 2 * Constant.BL_CODES + 1; i++)
-            this.bl_tree[i] = new DeflateCT();
         this.l_desc = new DeflateTreeDesc();
         this.d_desc = new DeflateTreeDesc();
         this.bl_desc = new DeflateTreeDesc();
-        this.bl_count = new Array(Constant.MAX_BITS + 1);
-        this.heap = new Array(2 * Constant.L_CODES + 1);
-        this.depth = new Array(2 * Constant.L_CODES + 1);
         this.length_code = new Array(Constant.MAX_MATCH - Constant.MIN_MATCH + 1);
         this.dist_code = new Array(512);
         this.base_length = new Array(Constant.LENGTH_CODES);
@@ -135,21 +119,21 @@ export default class OriginalZip {
     private deflate_internal = (buff: Array<number>, off: number, buff_size: number): number => {
         let n;
 
-
-        if (!this.initflag) {
+        if (!this.state.initflag) {
             this.init_deflate();
-            this.initflag = true;
+            this.state.initflag = true;
             if (this.lookahead == 0) { // empty
-                this.complete = true;
+                this.state.completed();
                 return 0;
             }
         }
 
-        if ((n = this.qcopy(buff, off, buff_size)) == buff_size)
+        n = this.que.qcopy(buff, off, buff_size);
+        if (n == buff_size)
             return buff_size;
 
 
-        if (this.complete) return n;
+        if (this.state.complete) return n;
 
         if (this.compr_level <= 3) // optimized for speed
             this.deflate_fast();
@@ -158,23 +142,20 @@ export default class OriginalZip {
 
         if (this.lookahead == 0) {
             if (this.match_available != 0)
-                this.ct_tally(0, this.window[this.strstart - 1] & 0xff);
+                this.ct_tally(0, this.deflateState.positionCodeOffset(-1));
             this.flush_block(1);
-            this.complete = true;
+            this.state.completed();
         }
-        return n + this.qcopy(buff, n + off, buff_size - n);
+        return n + this.que.qcopy(buff, n + off, buff_size - n);
     }
 
     private init_deflate = () => {
         if (this.eofile) return;
-        this.bi_buf = 0;
-        this.bi_valid = 0;
+        this.bits.initialize();
         this.ct_init();
         this.lm_init();
 
-        this.qhead = null;
-        this.outcnt = 0;
-        this.outoff = 0;
+        this.que.queClear();
 
         if (this.compr_level <= 3) {
             this.prev_length = Constant.MIN_MATCH - 1;
@@ -185,64 +166,17 @@ export default class OriginalZip {
             this.match_available = 0;
         }
 
-        this.complete = false;
-    }
-
-    private qcopy = (buff: Array<number>, off: number, buff_size: number): number => {
-        let n: number;
-        let i: number;
-        let j: number;
-
-        n = 0;
-        while (this.qhead != null && n < buff_size) {
-            i = buff_size - n;
-            if (i > this.qhead.len)
-                i = this.qhead.len;
-            //      System.arraycopy(qhead.ptr, qhead.off, buff, off + n, i);
-            for (j = 0; j < i; j++)
-                buff[off + n + j] = this.qhead.ptr[this.qhead.off + j];
-
-            this.qhead.off += i;
-            this.qhead.len -= i;
-            n += i;
-            if (this.qhead.len == 0) {
-                var p;
-                p = this.qhead;
-                this.qhead = this.qhead.next;
-                this.reuse_queue(p);
-            }
-        }
-
-        if (n == buff_size) return n;
-
-        if (this.outoff < this.outcnt) {
-            i = buff_size - n;
-            if (i > this.outcnt - this.outoff)
-                i = this.outcnt - this.outoff;
-
-
-            // System.arraycopy(outbuf, outoff, buff, off + n, i);
-            for (j = 0; j < i; j++) {
-                if (!this.outbuf) throw new Error(); 
-                buff[off + n + j] = this.outbuf[this.outoff + j];
-            }
-            this.outoff += i;
-            n += i;
-            if (this.outcnt == this.outoff) {
-                this.outcnt = this.outoff = 0;
-            }
-        }
-        return n;
+        this.state.notCompleted();
     }
 
     private deflate_fast = () => {
-        while (this.lookahead != 0 && this.qhead == null) {
+        while (this.lookahead != 0 && this.que.nothingQueHead()) {
             let flush; // set if current block must be flushed
 
             this.INSERT_STRING();
 
             if (this.hash_head != Constant.NIL &&
-                this.strstart - this.hash_head <= Constant.MAX_DIST) {
+                this.deflateState.strstart - this.hash_head <= Constant.MAX_DIST) {
                 this.match_length = this.longest_match(this.hash_head);
                 if (this.match_length > this.lookahead)
                     this.match_length = this.lookahead;
@@ -250,7 +184,7 @@ export default class OriginalZip {
             if (this.match_length >= Constant.MIN_MATCH) {
 
                 flush = this.ct_tally(
-                    this.strstart - this.match_start,
+                    this.deflateState.strstart - this.deflateState.match_start,
                     this.match_length - Constant.MIN_MATCH
                 );
                 this.lookahead -= this.match_length;
@@ -258,25 +192,25 @@ export default class OriginalZip {
                 if (this.match_length <= this.max_lazy_match) {
                     this.match_length--; // string at strstart already in hash table
                     do {
-                        this.strstart++;
+                        this.deflateState.moveNextStartPostion();
                         this.INSERT_STRING();
                     } while (--this.match_length != 0);
-                    this.strstart++;
+                    this.deflateState.moveNextStartPostion();
                 } else {
-                    this.strstart += this.match_length;
+                    this.deflateState.movePosition(this.match_length);
                     this.match_length = 0;
-                    this.ins_h = this.window[this.strstart] & 0xff;
-                    this.ins_h = ((this.ins_h << Constant.H_SHIFT) ^ (this.window[this.strstart + 1] & 0xff)) & Constant.HASH_MASK;
+                    this.ins_h = this.deflateState.firstPositionCode();
+                    this.ins_h = ((this.ins_h << Constant.H_SHIFT) ^ this.deflateState.positionCodeOffset(1)) & Constant.HASH_MASK;
                 }
             } else {
                 /* No match, output a literal byte */
-                flush = this.ct_tally(0, this.window[this.strstart] & 0xff);
+                flush = this.ct_tally(0, this.deflateState.firstPositionCode());
                 this.lookahead--;
-                this.strstart++;
+                this.deflateState.moveNextStartPostion();
             }
             if (flush) {
                 this.flush_block(0);
-                this.block_start = this.strstart;
+                this.block_start = this.deflateState.strstart;
             }
 
             while (this.lookahead < Constant.MIN_LOOKAHEAD && !this.eofile)
@@ -285,32 +219,40 @@ export default class OriginalZip {
     }
 
     private INSERT_STRING = () => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         this.ins_h = ((this.ins_h << Constant.H_SHIFT)
-            ^ (this.window[this.strstart + Constant.MIN_MATCH - 1] & 0xff))
-            & Constant.HASH_MASK;
+            ^ this.deflateState.positionCodeOffset(Constant.MIN_MATCH - 1)
+        ) & Constant.HASH_MASK;
         this.hash_head = this.head1(this.ins_h);
-        this.prev[this.strstart & Constant.WMASK] = this.hash_head;
-        this.head2(this.ins_h, this.strstart);
+        this.prev[this.deflateState.strstart & Constant.WMASK] = this.hash_head;
+        this.head2(this.ins_h, this.deflateState.strstart);
     }
+
     private head1 = (i: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
         return this.prev[Constant.WSIZE + i];
     }
+
     private head2 = (i: number, val: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
         return this.prev[Constant.WSIZE + i] = val;
     }
 
     private longest_match = (cur_match: number) => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         let chain_length: number = this.max_chain_length; // max hash chain length
-        let scanp: number = this.strstart; // current string
+        let scanp: number = this.deflateState.strstart; // current string
         let matchp: number;		// matched string
         let len: number;		// length of current match
         let best_len: number = this.prev_length;	// best match length so far
 
-        let limit: number = (this.strstart > Constant.MAX_DIST ? this.strstart - Constant.MAX_DIST : Constant.NIL);
+        let limit: number = (this.deflateState.strstart > Constant.MAX_DIST ? this.deflateState.strstart - Constant.MAX_DIST : Constant.NIL);
 
-        const strendp: number = this.strstart + Constant.MAX_MATCH;
-        let scan_end1 = this.window[scanp + best_len - 1];
-        let scan_end = this.window[scanp + best_len];
+        const strendp: number = this.deflateState.strstart + Constant.MAX_MATCH;
+        let scan_end1 = this.deflateState.window[scanp + best_len - 1];
+        let scan_end = this.deflateState.window[scanp + best_len];
 
         if (this.prev_length >= this.good_match)
             chain_length >>= 2;
@@ -318,31 +260,33 @@ export default class OriginalZip {
         do {
             matchp = cur_match;
 
-            if (this.window[matchp + best_len] != scan_end ||
-                this.window[matchp + best_len - 1] != scan_end1 ||
-                this.window[matchp] != this.window[scanp] ||
-                this.window[++matchp] != this.window[scanp + 1]) {
+            const defs: DeflateState = this.deflateState;
+
+            if (defs.window[matchp + best_len] != scan_end ||
+                defs.window[matchp + best_len - 1] != scan_end1 ||
+                defs.window[matchp] != defs.window[scanp] ||
+                defs.window[++matchp] != defs.window[scanp + 1]) {
                 continue;
             }
 
             scanp += 2;
             matchp++;
 
-            do { } while (this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
-                this.window[++scanp] == this.window[++matchp] &&
+            do { } while (defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
+                defs.window[++scanp] == defs.window[++matchp] &&
                 scanp < strendp);
 
             len = Constant.MAX_MATCH - (strendp - scanp);
             scanp = strendp - Constant.MAX_MATCH;
 
             if (len > best_len) {
-                this.match_start = cur_match;
+                defs.match_start = cur_match;
                 best_len = len;
                 if (Constant.FULL_SEARCH) {
                     if (len >= Constant.MAX_MATCH) break;
@@ -350,8 +294,8 @@ export default class OriginalZip {
                     if (len >= this.nice_match) break;
                 }
 
-                scan_end1 = this.window[scanp + best_len - 1];
-                scan_end = this.window[scanp + best_len];
+                scan_end1 = defs.window[scanp + best_len - 1];
+                scan_end = defs.window[scanp + best_len];
             }
         } while ((cur_match = this.prev[cur_match & Constant.WMASK]) > limit
             && --chain_length != 0);
@@ -361,24 +305,24 @@ export default class OriginalZip {
 
 
     private deflate_better = () => {
-        while (this.lookahead != 0 && this.qhead == null) {
+        while (this.lookahead != 0 && this.que.nothingQueHead()) {
             this.INSERT_STRING();
 
-            const prev_match = this.match_start;
+            const prev_match = this.deflateState.match_start;
 
             this.prev_length = this.match_length;
             this.match_length = Constant.MIN_MATCH - 1;
 
             if (this.hash_head != Constant.NIL &&
                 this.prev_length < this.max_lazy_match &&
-                this.strstart - this.hash_head <= Constant.MAX_DIST) {
+                this.deflateState.strstart - this.hash_head <= Constant.MAX_DIST) {
 
                 this.match_length = this.longest_match(this.hash_head);
                 if (this.match_length > this.lookahead)
                     this.match_length = this.lookahead;
 
                 if (this.match_length == Constant.MIN_MATCH &&
-                    this.strstart - this.match_start > Constant.TOO_FAR) {
+                    this.deflateState.strstart - prev_match > Constant.TOO_FAR) {
                     this.match_length--;
                 }
             }
@@ -386,32 +330,32 @@ export default class OriginalZip {
                 this.match_length <= this.prev_length) {
                 let flush; // set if current block must be flushed
 
-                flush = this.ct_tally(this.strstart - 1 - prev_match,
+                flush = this.ct_tally(this.deflateState.strstart - 1 - prev_match,
                     this.prev_length - Constant.MIN_MATCH);
 
                 this.lookahead -= this.prev_length - 1;
                 this.prev_length -= 2;
                 do {
-                    this.strstart++;
+                    this.deflateState.moveNextStartPostion();
                     this.INSERT_STRING();
                 } while (--this.prev_length != 0);
                 this.match_available = 0;
                 this.match_length = Constant.MIN_MATCH - 1;
-                this.strstart++;
+                this.deflateState.moveNextStartPostion();
                 if (flush) {
                     this.flush_block(0);
-                    this.block_start = this.strstart;
+                    this.block_start = this.deflateState.strstart;
                 }
             } else if (this.match_available != 0) {
-                if (this.ct_tally(0, this.window[this.strstart - 1] & 0xff)) {
+                if (this.ct_tally(0, this.deflateState.positionCodeOffset(-1))) {
                     this.flush_block(0);
-                    this.block_start = this.strstart;
+                    this.block_start = this.deflateState.strstart;
                 }
-                this.strstart++;
+                this.deflateState.moveNextStartPostion();
                 this.lookahead--;
             } else {
                 this.match_available = 1;
-                this.strstart++;
+                this.deflateState.moveNextStartPostion();
                 this.lookahead--;
             }
 
@@ -426,20 +370,20 @@ export default class OriginalZip {
      * @param lc  match length-MIN_MATCH or unmatched char (if dist==0).
      */
     private ct_tally = (dist: number, lc: number) => {
-
+        if (!this.l_buf) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.d_buf) throw new Error();  // 後付けチェック TODO 消したい
 
         this.l_buf[this.last_lit++] = lc;
 
 
         if (dist == 0) {
-            if (this.dyn_ltree == null) throw new Error();
             this.dyn_ltree[lc].fc++;
         } else {
             dist--;		    // dist = match distance - 1
 
-            if (this.dyn_ltree == null) throw new Error();
             this.dyn_ltree[this.length_code[lc] + Constant.LITERALS + 1].fc++;
-            if (this.dyn_dtree == null) throw new Error();
             this.dyn_dtree[this.D_CODE(dist)].fc++;
 
             this.d_buf[this.last_dist++] = dist;
@@ -454,10 +398,9 @@ export default class OriginalZip {
         }
         if (this.compr_level > 2 && (this.last_lit & 0xfff) == 0) {
             let out_length = this.last_lit * 8;
-            const in_length = this.strstart - this.block_start;
+            const in_length = this.deflateState.strstart - this.block_start;
 
             for (let dcode = 0; dcode < Constant.D_CODES; dcode++) {
-                if (this.dyn_dtree == null) throw new Error();
                 out_length += this.dyn_dtree[dcode].fc * (5 + Constant.EXTRA_D_BITS[dcode]);
             }
             out_length >>= 3;
@@ -474,10 +417,12 @@ export default class OriginalZip {
 
 
     private ct_init = () => {
+        if (!this.static_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         let code: number;	// code value
         let dist: number;	// distance index
 
-        if (this.static_dtree == null || this.static_dtree[0].dl != 0) return; // ct_init already called
+        if (this.static_dtree[0].dl != 0) return; // ct_init already called
 
         const lDesc: DeflateTreeDesc = this.l_desc;
         lDesc.dyn_tree = this.dyn_ltree;
@@ -496,7 +441,7 @@ export default class OriginalZip {
         this.d_desc.max_length = Constant.MAX_BITS;
         this.d_desc.max_code = 0;
 
-        this.bl_desc.dyn_tree = this.bl_tree;
+        this.bl_desc.dyn_tree = this.treeState.bl_tree;
         this.bl_desc.static_tree = null;
         this.bl_desc.extra_bits = Constant.EXTRA_BL_BITS;
         this.bl_desc.extra_base = 0;
@@ -526,30 +471,23 @@ export default class OriginalZip {
                 this.dist_code[256 + dist++] = code;
         }
 
-        for (let bits = 0; bits <= Constant.MAX_BITS; bits++)
-            this.bl_count[bits] = 0;
         for (let n = 0; n < this.static_ltree.length; n++) {
             let dlValue = 8;
             if (n > 143) {
                 if (n <= 255) dlValue = 9
                 else if (n <= 279) dlValue = 7;
             }
-        
             this.static_ltree[n].dl = dlValue;
-            this.bl_count[dlValue]++;
         }
-        // // 上は下のルーチンを書き換えたもの TODO 安定したら下を消す     
-        // while (n <= 143) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
-        // while (n <= 255) { this.static_ltree[n++].dl = 9; this.bl_count[9]++; }
-        // while (n <= 279) { this.static_ltree[n++].dl = 7; this.bl_count[7]++; }
-        // while (n <= 287) { this.static_ltree[n++].dl = 8; this.bl_count[8]++; }
 
-        this.gen_codes(this.static_ltree, Constant.L_CODES + 1);
+        this.heepState.initialSetBlCount();
+
+        this.heepState.gen_codes(this.static_ltree, Constant.L_CODES + 1);
 
         /* The static distance tree is trivial: */
         for (let i = 0; i < Constant.D_CODES; i++) {
             this.static_dtree[i].dl = 5;
-            this.static_dtree[i].fc = this.bi_reverse(i, 5);
+            this.static_dtree[i].fc = this.heepState.bi_reverse(i, 5);
         }
 
         // Initialize the first block of the first file:
@@ -558,61 +496,25 @@ export default class OriginalZip {
     }
 
     /**
-     * gen_codes.
-     * @param tree the tree to decorate.
-     * @param max_code largest code with non zero frequency.
-     */
-    private gen_codes = (tree: Array<DeflateCT>, max_code: number) => {
-        const next_code = new Array(Constant.MAX_BITS + 1); // next code value for each bit length
-        let code = 0;		// running code value
-
-        for (let bits = 1; bits <= Constant.MAX_BITS; bits++) {
-            code = ((code + this.bl_count[bits - 1]) << 1);
-            next_code[bits] = code;
-        }
-
-        for (let n = 0; n <= max_code; n++) {
-            let len = tree[n].dl;
-            if (len == 0)
-                continue;
-            // Now reverse the bits
-            tree[n].fc = this.bi_reverse(next_code[len]++, len);
-        }
-    }
-
-    /**
-     * bi_reverse.
-     * @param code the value to invert.
-     * @param len its bit length.
-     */
-    private bi_reverse = (code: number, len: number) => {
-        let res = 0;
-        do {
-            res |= code & 1;
-            code >>= 1;
-            res <<= 1;
-        } while (--len > 0);
-        return res >> 1;
-    }
-
-    /**
      * @number true if this is the last block for a file
      */
     private flush_block = (eof: number) => {
+        if (!this.static_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
 
-
-        let stored_len = this.strstart - this.block_start;	// length of input block
+        let stored_len = this.deflateState.strstart - this.block_start;	// length of input block
         this.flag_buf[this.last_flags] = this.flags; // Save the flags for the last 8 items
 
 
-        this.build_tree(this.l_desc);
-        this.build_tree(this.d_desc);
+        this.heepState.build_tree(this.l_desc);
+        this.heepState.build_tree(this.d_desc);
 
-        const max_blindex = this.build_bl_tree(); // index of last bit length code of non zero freq
+        const max_blindex = this.build_bl_tree(this.treeState); // index of last bit length code of non zero freq
 
 
-        let opt_lenb = (this.opt_len + 3 + 7) >> 3;
-        const static_lenb = (this.static_len + 3 + 7) >> 3; // opt_len and static_len in bytes
+        let opt_lenb = (this.heepState.opt_len + 3 + 7) >> 3;
+        const static_lenb = (this.heepState.static_len + 3 + 7) >> 3; // opt_len and static_len in bytes
 
         if (static_lenb <= opt_lenb)
             opt_lenb = static_lenb;
@@ -620,82 +522,28 @@ export default class OriginalZip {
             && this.block_start >= 0) {
             let i;
 
-            this.send_bits((Constant.STORED_BLOCK << 1) + eof, 3);  /* send block type */
-            this.bi_windup();		 /* align on byte boundary */
-            this.put_short(stored_len);
-            this.put_short(~stored_len);
+            this.bits.send_bits((Constant.STORED_BLOCK << 1) + eof, 3, this.que);  /* send block type */
+            this.bits.bi_windup(this.que);		 /* align on byte boundary */
+            this.que.put_short(stored_len);
+            this.que.put_short(~stored_len);
 
             for (i = 0; i < stored_len; i++)
-                this.put_byte(this.window[this.block_start + i]);
+                this.que.put_byte(this.deflateState.window[this.block_start + i]);
 
         } else if (static_lenb == opt_lenb) {
-            this.send_bits((Constant.STATIC_TREES << 1) + eof, 3);
-            if (this.static_dtree != null) {
-                this.compress_block(this.static_ltree, this.static_dtree);
-            } 
+            this.bits.send_bits((Constant.STATIC_TREES << 1) + eof, 3, this.que);
+            this.compress_block(this.static_ltree, this.static_dtree);
         } else {
-
-
-            this.send_bits((Constant.DYN_TREES << 1) + eof, 3);
+            this.bits.send_bits((Constant.DYN_TREES << 1) + eof, 3, this.que);
             this.send_all_trees(this.l_desc.max_code + 1,
                 this.d_desc.max_code + 1,
                 max_blindex + 1);
-                if (this.dyn_dtree == null) throw new Error();
-                this.compress_block(this.dyn_ltree, this.dyn_dtree);
+            this.compress_block(this.dyn_ltree, this.dyn_dtree);
         }
 
         this.init_block();
 
-        if (eof != 0) this.bi_windup();
-    }
-
-    /**
-     * send_bits.
-     * @param value value to send. 
-     * @param length  number of bits.
-     */
-    private send_bits = (value: number, length: number) => {
-
-
-        const BUF_SIZE = 16; // bit size of bi_buf
-        if (this.bi_valid > BUF_SIZE - length) {
-            this.bi_buf |= (value << this.bi_valid);
-            this.put_short(this.bi_buf);
-            this.bi_buf = (value >> (BUF_SIZE - this.bi_valid));
-            this.bi_valid += length - BUF_SIZE;
-        } else {
-            this.bi_buf |= value << this.bi_valid;
-            this.bi_valid += length;
-        }
-    }
-
-    private bi_windup = () => {
-        if (this.bi_valid > 8) {
-            this.put_short(this.bi_buf);
-        } else if (this.bi_valid > 0) {
-            this.put_byte(this.bi_buf);
-        }
-        this.bi_buf = 0;
-        this.bi_valid = 0;
-    }
-
-    private put_short = (w: number) => {
-        w &= 0xffff;
-        if (this.outoff + this.outcnt < Constant.OUTBUFSIZ - 2) {
-            if (!this.outbuf) throw new Error(); 
-            this.outbuf[this.outoff + this.outcnt++] = (w & 0xff);
-            this.outbuf[this.outoff + this.outcnt++] = (w >>> 8);
-        } else {
-            this.put_byte(w & 0xff);
-            this.put_byte(w >>> 8);
-        }
-    }
-
-    private put_byte = (c: number) => {
-        if (!this.outbuf) throw new Error(); 
-        this.outbuf[this.outoff + this.outcnt++] = c;
-        if (this.outoff + this.outcnt == Constant.OUTBUFSIZ)
-            this.qoutbuf();
+        if (eof != 0) this.bits.bi_windup(this.que);
     }
 
     /**
@@ -703,7 +551,9 @@ export default class OriginalZip {
      * @param ltree literal tree. 
      * @param dtree distance tree.
      */
-    private compress_block = (ltree: Array<DeflateCT> | null, dtree: Array<DeflateCT>) => {
+    private compress_block = (ltree: Array<DeflateCT>, dtree: Array<DeflateCT>) => {
+        if (!this.l_buf) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.d_buf) throw new Error();  // 後付けチェック TODO 消したい
 
         let dist: number;		// distance of matched string
         let lc: number;		// match length or unmatched char (if dist == 0)
@@ -730,7 +580,7 @@ export default class OriginalZip {
                     lc -= this.base_length[code];
 
 
-                    this.send_bits(lc, extra); // send the extra length bits
+                    this.bits.send_bits(lc, extra, this.que); // send the extra length bits
                 }
                 dist = this.d_buf[dx++];
                 code = this.D_CODE(dist);
@@ -740,7 +590,7 @@ export default class OriginalZip {
                     dist -= this.base_dist[code];
 
 
-                    this.send_bits(dist, extra);   // send the extra distance bits
+                    this.bits.send_bits(dist, extra, this.que);   // send the extra distance bits
                 }
             } // literal or match pair ?
             flag >>= 1;
@@ -749,21 +599,21 @@ export default class OriginalZip {
         this.SEND_CODE(Constant.END_BLOCK, ltree);
     }
 
-    private SEND_CODE = (c: number, tree: Array<DeflateCT> | null) => {
-        if (tree == null) return;
-        this.send_bits(tree[c].fc, tree[c].dl);
+    private SEND_CODE = (c: number, tree: Array<DeflateCT>) => {
+        this.bits.send_bits(tree[c].fc, tree[c].dl, this.que);
     }
 
     private init_block = () => {
-        if (this.dyn_ltree == null) throw new Error();
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
+
         // Initialize the trees.
         for (let n = 0; n < Constant.L_CODES; n++) this.dyn_ltree[n].fc = 0;
-        if (this.dyn_dtree == null) throw new Error();
         for (let n = 0; n < Constant.D_CODES; n++) this.dyn_dtree[n].fc = 0;
-        for (let n = 0; n < Constant.BL_CODES; n++) this.bl_tree[n].fc = 0;
+        this.treeState.claerAllFc();
 
         this.dyn_ltree[Constant.END_BLOCK].fc = 1;
-        this.opt_len = this.static_len = 0;
+        this.heepState.clearLength();
         this.last_lit = 0;
         this.last_dist = 0;
         this.last_flags = 0;
@@ -772,13 +622,14 @@ export default class OriginalZip {
     }
 
     private send_all_trees = (lcodes: number, dcodes: number, blcodes: number) => { // number of codes for each tree
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
 
-
-        this.send_bits(lcodes - 257, 5); // not +255 as stated in appnote.txt
-        this.send_bits(dcodes - 1, 5);
-        this.send_bits(blcodes - 4, 4); // not -3 as stated in appnote.txt
+        this.bits.send_bits(lcodes - 257, 5, this.que); // not +255 as stated in appnote.txt
+        this.bits.send_bits(dcodes - 1, 5, this.que);
+        this.bits.send_bits(blcodes - 4, 4, this.que); // not -3 as stated in appnote.txt
         for (let rank = 0; rank < blcodes; rank++) {
-            this.send_bits(this.bl_tree[Constant.BL_ORDER[rank]].dl, 3);
+            this.bits.send_bits(this.treeState.getItemWithOrder(rank).dl, 3, this.que);
         }
         this.send_tree(this.dyn_ltree, lcodes - 1);
         this.send_tree(this.dyn_dtree, dcodes - 1);
@@ -789,9 +640,7 @@ export default class OriginalZip {
      * @param tree the tree to be scanned.
      * @param max_code and its largest code of non zero frequency.
      */
-    private send_tree = (tree: Array<DeflateCT> | null, max_code: number) => {
-
-        if (tree == null) throw new Error();
+    private send_tree = (tree: Array<DeflateCT>, max_code: number) => {
 
         let nextlen = tree[0].dl;	// length of next code
 
@@ -803,6 +652,8 @@ export default class OriginalZip {
             min_count = 3;
         }
 
+        const bl_tree = this.treeState.bl_tree;
+
         let prevlen = -1;		// last emitted length
         let count = 0;		// repeat count of the current code
         for (let n = 0; n <= max_code; n++) {
@@ -811,21 +662,21 @@ export default class OriginalZip {
             if (++count < max_count && curlen == nextlen) {
                 continue;
             } else if (count < min_count) {
-                do { this.SEND_CODE(curlen, this.bl_tree); } while (--count != 0);
+                do { this.SEND_CODE(curlen, bl_tree); } while (--count != 0);
             } else if (curlen != 0) {
                 if (curlen != prevlen) {
-                    this.SEND_CODE(curlen, this.bl_tree);
+                    this.SEND_CODE(curlen, bl_tree);
                     count--;
                 }
                 // Assert(count >= 3 && count <= 6, " 3_6?");
-                this.SEND_CODE(Constant.REP_3_6, this.bl_tree);
-                this.send_bits(count - 3, 2);
+                this.SEND_CODE(Constant.REP_3_6, bl_tree);
+                this.bits.send_bits(count - 3, 2, this.que);
             } else if (count <= 10) {
-                this.SEND_CODE(Constant.REPZ_3_10, this.bl_tree);
-                this.send_bits(count - 3, 3);
+                this.SEND_CODE(Constant.REPZ_3_10, bl_tree);
+                this.bits.send_bits(count - 3, 3, this.que);
             } else {
-                this.SEND_CODE(Constant.REPZ_11_138, this.bl_tree);
-                this.send_bits(count - 11, 7);
+                this.SEND_CODE(Constant.REPZ_11_138, bl_tree);
+                this.bits.send_bits(count - 11, 7, this.que);
             }
             count = 0;
             prevlen = curlen;
@@ -841,36 +692,10 @@ export default class OriginalZip {
             }
         }
     }
-    private qoutbuf = () => {
-        if (!this.outbuf) throw new Error(); 
-
-        if (this.outcnt != 0) {
-            const q = this.new_queue();
-            if (this.qhead == null)
-                this.qhead = this.qtail = q;
-            else
-                this.qtail = this.qtail.next = q;
-            q.len = this.outcnt - this.outoff;
-            for (let i = 0; i < q.len; i++)
-                q.ptr[i] = this.outbuf[this.outoff + i];
-            this.outcnt = this.outoff = 0;
-        }
-    }
-
-    private new_queue = (): DeflateBuffer => {
-        let p = new DeflateBuffer();
-        if (this.free_queue != null) {
-            p = this.free_queue;
-            this.free_queue = this.free_queue.next;
-        }
-        p.next = null;
-        p.len = 0;
-        p.off = 0;
-        return p;
-    }
-
 
     private lm_init = () => {
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
         /* Initialize the hash table. */
         for (let j = 0; j < Constant.HASH_SIZE; j++)
             this.prev[Constant.WSIZE + j] = 0;
@@ -881,10 +706,10 @@ export default class OriginalZip {
         if (!Constant.FULL_SEARCH) this.nice_match = tableItem.nice_length;
         this.max_chain_length = tableItem.max_chain;
 
-        this.strstart = 0;
+        this.deflateState.clearPosition();
         this.block_start = 0;
 
-        this.lookahead = this.read_buff(this.window, 0, 2 * Constant.WSIZE);
+        this.lookahead = this.deflateState.read_buff(0, 2 * Constant.WSIZE);
         if (this.lookahead <= 0) {
             this.eofile = true;
             this.lookahead = 0;
@@ -897,33 +722,23 @@ export default class OriginalZip {
 
         this.ins_h = 0;
         for (let j = 0; j < Constant.MIN_MATCH - 1; j++) {
-            this.ins_h = ((this.ins_h << Constant.H_SHIFT) ^ (this.window[j] & 0xff)) & Constant.HASH_MASK;
+            this.ins_h = ((this.ins_h << Constant.H_SHIFT) ^ (this.deflateState.window[j] & 0xff)) & Constant.HASH_MASK;
         }
     }
 
-    private read_buff = (buff: Array<number>, offset: number, n: number): number => {
-        let i: number;
-        for (i = 0; i < n && this.deflate_pos < this.deflate_data.length; i++)
-            buff[offset + i] = this.deflate_data.charCodeAt(this.deflate_pos++) & 0xff;
-        return i;
-    }
-
-    private reuse_queue = (p: DeflateBuffer) => {
-        p.next = this.free_queue;
-        this.free_queue = p;
-    }
-
     private fill_window = () => {
-        let more = Constant.WINDOW_SIZE - this.lookahead - this.strstart;
+        if (!this.prev) throw new Error();  // 後付けチェック TODO 消したい
+
+        let more = Constant.WINDOW_SIZE - this.lookahead - this.deflateState.strstart;
 
         if (more == -1) {
             more--;
-        } else if (this.strstart >= Constant.WSIZE + Constant.MAX_DIST) {
+        } else if (this.deflateState.strstart >= Constant.WSIZE + Constant.MAX_DIST) {
             for (let n = 0; n < Constant.WSIZE; n++)
-                this.window[n] = this.window[n + Constant.WSIZE];
+                this.deflateState.window[n] = this.deflateState.window[n + Constant.WSIZE];
 
-            this.match_start -= Constant.WSIZE;
-            this.strstart -= Constant.WSIZE; /* we now have strstart >= MAX_DIST: */
+            this.deflateState.match_start -= Constant.WSIZE;
+            this.deflateState.movePosition(-Constant.WSIZE); /* we now have strstart >= MAX_DIST: */
             this.block_start -= Constant.WSIZE;
 
             for (let n = 0; n < Constant.HASH_SIZE; n++) {
@@ -937,7 +752,7 @@ export default class OriginalZip {
             more += Constant.WSIZE;
         }
         if (!this.eofile) {
-            const n = this.read_buff(this.window, this.strstart + this.lookahead, more);
+            const n = this.deflateState.read_buff(this.deflateState.strstart + this.lookahead, more);
             if (n <= 0)
                 this.eofile = true;
             else
@@ -945,243 +760,20 @@ export default class OriginalZip {
         }
     }
 
-    private build_tree = (desc: DeflateTreeDesc) => { // the tree descriptor
-        let tree: Array<DeflateCT> | null = desc.dyn_tree;
-        if (tree == null) throw new Error();
-        let stree = desc.static_tree;
-        let elems = desc.elems;
-        let max_code = -1;	// largest code with non zero frequency
-        let node = elems;	// next internal node of the tree
+    private build_bl_tree(treeState: TreeState): number {
+        if (!this.dyn_ltree) throw new Error();  // 後付けチェック TODO 消したい
+        if (!this.dyn_dtree) throw new Error();  // 後付けチェック TODO 消したい
 
-        this.heap_len = 0;
-        this.heap_max = Constant.HEAP_SIZE;
+        treeState.scan_tree(this.dyn_ltree, this.l_desc.max_code);
+        treeState.scan_tree(this.dyn_dtree, this.d_desc.max_code);
 
-        for (let n = 0; n < elems; n++) {
-            if (tree[n].fc != 0) {
-                this.heap[++this.heap_len] = max_code = n;
-                this.depth[n] = 0;
-            } else {
-                tree[n].dl = 0;
-            }
-        }
-
-        while (this.heap_len < 2) {
-            let xnew = this.heap[++this.heap_len] = (max_code < 2 ? ++max_code : 0);
-            tree[xnew].fc = 1;
-            this.depth[xnew] = 0;
-            this.opt_len--;
-            if (stree != null)
-                this.static_len -= stree[xnew].dl;
-        }
-        desc.max_code = max_code;
-
-        for (let n = this.heap_len >> 1; n >= 1; n--)
-            this.pqdownheap(tree, n);
-
-        do {
-            const n = this.heap[Constant.SMALLEST];
-            this.heap[Constant.SMALLEST] = this.heap[this.heap_len--];
-            this.pqdownheap(tree, Constant.SMALLEST);
-
-            const m = this.heap[Constant.SMALLEST];  // m = node of next least frequency
-
-            this.heap[--this.heap_max] = n;
-            this.heap[--this.heap_max] = m;
-
-            tree[node].fc = tree[n].fc + tree[m].fc;
-            if (this.depth[n] > this.depth[m] + 1)
-                this.depth[node] = this.depth[n];
-            else
-                this.depth[node] = this.depth[m] + 1;
-            tree[n].dl = tree[m].dl = node;
-
-            this.heap[Constant.SMALLEST] = node++;
-            this.pqdownheap(tree, Constant.SMALLEST);
-
-        } while (this.heap_len >= 2);
-
-        this.heap[--this.heap_max] = this.heap[Constant.SMALLEST];
-
-        this.gen_bitlen(desc);
-
-        this.gen_codes(tree, max_code);
-    }
-
-    /**
-     * 
-     * @param tree the tree to restore.
-     * @param k node to move down.
-     */
-    private pqdownheap = (tree: Array<DeflateCT>, k: number) => {
-        let v = this.heap[k];
-        let j = k << 1;	// left son of k
-
-        while (j <= this.heap_len) {
-            // Set j to the smallest of the two sons:
-            if (j < this.heap_len &&
-                this.SMALLER(tree, this.heap[j + 1], this.heap[j]))
-                j++;
-
-            // Exit if v is smaller than both sons
-            if (this.SMALLER(tree, v, this.heap[j]))
-                break;
-
-            // Exchange v with the smallest son
-            this.heap[k] = this.heap[j];
-            k = j;
-            // And continue down the tree, setting j to the left son of k
-            j <<= 1;
-        }
-        this.heap[k] = v;
-    }
-
-    private SMALLER = (tree: Array<DeflateCT>, n: number, m: number): boolean => {
-        return tree[n].fc < tree[m].fc ||
-            (tree[n].fc == tree[m].fc && this.depth[n] <= this.depth[m]);
-    }
-
-    private gen_bitlen = (desc: DeflateTreeDesc) => { // the tree descriptor
-
-        const tree = desc.dyn_tree;
-        if (tree == null) throw new Error();
-        const extra = desc.extra_bits;
-        const base = desc.extra_base;
-        const max_code = desc.max_code;
-        const max_length = desc.max_length;
-        const stree = desc.static_tree;
-
-        for (let bits = 0; bits <= Constant.MAX_BITS; bits++)
-            this.bl_count[bits] = 0;
-
-        /* In a first pass, compute the optimal bit lengths (which may
-         * overflow in the case of the bit length tree).
-         */
-        tree[this.heap[this.heap_max]].dl = 0; // root of the heap
-
-        let overflow = 0;// number of elements with bit length too large
-        let h: number;
-        for (h = this.heap_max + 1; h < Constant.HEAP_SIZE; h++) {
-            const n = this.heap[h];
-            let bits = tree[tree[n].dl].dl + 1;
-            if (bits > max_length) {
-                bits = max_length;
-                overflow++;
-            }
-            tree[n].dl = bits;
-            // We overwrite tree[n].dl which is no longer needed
-
-            if (n > max_code)
-                continue; // not a leaf node
-
-            this.bl_count[bits]++;
-            let xbits = 0;// extra bits
-            if (n >= base)
-                xbits = extra[n - base];
-            const f = tree[n].fc;// frequency
-            this.opt_len += f * (bits + xbits);
-            if (stree != null)
-                this.static_len += f * (stree[n].dl + xbits);
-        }
-        if (overflow == 0) return;
-
-        // This happens for example on obj2 and pic of the Calgary corpus
-
-        // Find the first bit length which could increase:
-        do {
-            let bits = max_length - 1;
-            while (this.bl_count[bits] == 0)
-                bits--;
-            this.bl_count[bits]--;		// move one leaf down the tree
-            this.bl_count[bits + 1] += 2;	// move one overflow item as its brother
-            this.bl_count[max_length]--;
-            /* The brother of the overflow item also moves one step up,
-             * but this does not affect bl_count[max_length]
-             */
-            overflow -= 2;
-        } while (overflow > 0);
-
-        /* Now recompute all bit lengths, scanning in increasing frequency.
-         * h is still equal to HEAP_SIZE. (It is simpler to reconstruct all
-         * lengths instead of fixing only the wrong ones. This idea is taken
-         * from 'ar' written by Haruhiko Okumura.)
-         */
-        for (let bits = max_length; bits != 0; bits--) {
-            let n = this.bl_count[bits];
-            while (n != 0) {
-                const m = this.heap[--h];
-                if (m > max_code)
-                    continue;
-                if (tree[m].dl != bits) {
-                    this.opt_len += (bits - tree[m].dl) * tree[m].fc;
-                    tree[m].fc = bits;
-                }
-                n--;
-            }
-        }
-    }
-
-
-    private build_bl_tree(): number {
-        if (this.dyn_ltree == null) throw new Error();
-        this.scan_tree(this.dyn_ltree, this.l_desc.max_code);
-        if (this.dyn_dtree == null) throw new Error();
-        this.scan_tree(this.dyn_dtree, this.d_desc.max_code);
-
-        this.build_tree(this.bl_desc);
+        this.heepState.build_tree(this.bl_desc);
         let max_blindex: number;
         for (max_blindex = Constant.BL_CODES - 1; max_blindex >= 3; max_blindex--) {
-            if (this.bl_tree[Constant.BL_ORDER[max_blindex]].dl != 0) break;
+            if (treeState.getItemWithOrder(max_blindex).dl != 0) break;
         }
-        this.opt_len += 3 * (max_blindex + 1) + 5 + 5 + 4;
+        this.heepState.addOptLength(3 * (max_blindex + 1) + 5 + 5 + 4);
         return max_blindex;
-    }
-
-    /**
-     * scan_tree.
-     * @param tree the tree to be scanned.
-     * @param max_code and its largest code of non zero frequency.
-     */
-    private scan_tree(tree: Array<DeflateCT>, max_code: number) {
-
-        let max_count = 7;		// max repeat count
-        let min_count = 4;		// min repeat count
-        let nextlen = tree[0].dl;	// length of next code
-        if (nextlen == 0) {
-            max_count = 138;
-            min_count = 3;
-        }
-        tree[max_code + 1].dl = 0xffff; // guard
-
-        let prevlen = -1;		// last emitted length
-        let count = 0;		// repeat count of the current code
-        for (let n = 0; n <= max_code; n++) {
-            const curlen = nextlen; // length of current code
-            nextlen = tree[n + 1].dl;
-            if (++count < max_count && curlen == nextlen)
-                continue;
-            else if (count < min_count)
-                this.bl_tree[curlen].fc += count;
-            else if (curlen != 0) {
-                if (curlen != prevlen)
-                    this.bl_tree[curlen].fc++;
-                this.bl_tree[Constant.REP_3_6].fc++;
-            } else if (count <= 10)
-                this.bl_tree[Constant.REPZ_3_10].fc++;
-            else
-                this.bl_tree[Constant.REPZ_11_138].fc++;
-            count = 0;
-            prevlen = curlen;
-            if (nextlen == 0) {
-                max_count = 138;
-                min_count = 3;
-            } else if (curlen == nextlen) {
-                max_count = 6;
-                min_count = 3;
-            } else {
-                max_count = 7;
-                min_count = 4;
-            }
-        }
     }
 
 }
