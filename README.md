@@ -2,7 +2,7 @@
 
 ## Latest integration
 
-- [![wercker status](https://app.wercker.com/status/27abe6c106f3a6a6e2b042e8db12c59f/s/ "wercker status")](https://app.wercker.com/project/byKey/27abe6c106f3a6a6e2b042e8db12c59f)
+- [![ci](https://github.com/kazuhito-m/slack-plantuml-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/kazuhito-m/slack-plantuml-bot/actions/workflows/ci.yml)
 - [![CircleCI](https://circleci.com/gh/kazuhito-m/slack-plantuml-bot.svg?style=svg)](https://circleci.com/gh/kazuhito-m/slack-plantuml-bot)
 
 ## What's this
