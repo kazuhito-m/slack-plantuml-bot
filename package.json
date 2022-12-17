@@ -7,7 +7,7 @@
     "node": ">=9.2.0"
   },
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "webpack",
     "watch": "webpack -w",
     "test": "jest --no-cache",
     "docker-build": "docker build --tag=kazuhito/$npm_package_name:$npm_package_version --tag=kazuhito/$npm_package_name:latest ."
@@ -34,18 +34,16 @@
     ]
   },
   "devDependencies": {
-    "@types/jest": "^22.2.3",
-    "@types/node": "^10.1.2",
-    "ajv": "^6.5.0",
-    "awesome-typescript-loader": "^5.0.0",
-    "jest": "^22.4.4",
+    "@types/jest": "^21.1.8",
+    "@types/node": "^8.0.53",
+    "awesome-typescript-loader": "^3.4.0",
+    "jest": "^21.2.1",
     "source-map-loader": "^0.2.3",
-    "ts-jest": "^22.4.6",
-    "typescript": "^2.8.3",
-    "webpack": "^4.8.3",
-    "webpack-cli": "^2.1.4"
+    "ts-jest": "^21.2.4",
+    "typescript": "^2.6.2",
+    "webpack": "^3.8.1"
   },
   "dependencies": {
-    "botkit": "^0.6.14"
+    "botkit": "^0.6.7"
   }
 }
